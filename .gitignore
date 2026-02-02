@@ -1,0 +1,41 @@
+*.csv
+
+# Data exports / datasets (do not commit)
+/CTE_cases/
+/organized_CT_and_CTE/
+/extracted_CT_and_CTE/
+
+# Imaging files (do not commit)
+*.nii
+*.nii.gz
+*.mha
+*.mhd
+*.nrrd
+*.dcm
+*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Logs
+*.log

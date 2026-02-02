@@ -1,0 +1,7 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it."
+title: "IBD CT / CTE dataset arrangement"
+authors:
+  - family-names: "Hoda"
+version: "2.0"
+date-released: "2026-02-02"

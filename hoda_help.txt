@@ -1,0 +1,20 @@
+Step 0 (once): install deps
+
+pip install pandas nibabel tqdm
+Step 1: Generate the master CSVs (CT + CTE scoring)
+
+Run list_ct_data.py on the raw dataset:
+python list_ct_data.py --root-dir /data/ibd/data/patients --output-dir . --process-all-series
+Outputs (in --output-dir):
+ct_all_scans_combined.csv (all CT series)
+cte_all_data.csv + per-type cte_{uc,cd,ibdu}_data.csv (CTE where CTE_Score >= --cte-threshold)
+If you want more recall (more “maybe CTE” kept for review):
+python list_ct_data.py --cte-threshold 2.5 --uncertain-threshold 2.0 --process-all-series
+Step 2 (recommended): Export actual files into folders
+
+Use create_cte_dataset_2.0.py in from-combined mode (this creates BOTH CT_all and CTE_only):
+python create_cte_dataset_2.0.py from-combined --combined-csv ct_all_scans_combined.csv --base-data-dir /data/ibd/data/patients --output-dir organized_CT_and_CTE --mode copy --include-uncertain
+Result:
+organized_CT_and_CTE/CT_all/{cd,uc,ibdu}/...
+organized_CT_and_CTE/CTE_only/{cd,uc,ibdu}/...
+organized_CT_and_CTE/CT_all_mapping.csv and organized_CT_and_CTE/CTE_only_mapping.csv
