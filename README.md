@@ -1,64 +1,83 @@
-# IBD CT / CTE dataset arrangement
+# IBD CT / CTE Dataset Arrangement
 
-This folder contains scripts to **scan an uncleaned imaging dataset**, identify **CT** and **CT Enterography (CTE)** studies using **NIfTI + JSON sidecars**, and then **export** organized folders containing:
+Tools to **scan an uncleaned IBD imaging dataset**, identify **CT** and
+**CT Enterography (CTE)** studies from **NIfTI + JSON sidecars**, and **export**
+organized folders for downstream ML pipelines.
 
-- all CT scans (`CT_all/`)
-- CTE subset (`CTE_only/`)
+Outputs:
 
-The intended use is to maximize **CTE recall** (don’t miss true CTEs), while still keeping traceability for review.
+| Folder | Contents |
+|--------|----------|
+| `CT_all/` | Every CT scan (cd / uc / ibdu) |
+| `CTE_only/` | CTE subset (optionally includes UNCERTAIN) |
+| `CTEs_cd_patients/` | Quick CD-only CTE collection for server transfer |
 
-Important: this repo is meant to publish **code only** (no NIfTI, no DICOM, no patient metadata exports).
+> **Important:** this repo publishes **code only** — no NIfTI, no DICOM, no patient metadata.
+
+---
+
+## Repository structure
+
+```text
+.
+├── list_ct_data.py                          # Step 1: scan & classify
+├── create_cte_dataset_2.0.py                # Step 2: organize CT + CTE
+├── cd_cte_collection.py                     # Step 3 (optional): collect CD CTEs
+├── create_cte_dataset_1.0.py                # (legacy v1 organizer)
+├── extract_ct_and_cte_from_combined_csv.py  # (redundant — kept for reference)
+├── requirements.txt
+├── README.md
+├── LICENSE
+├── CITATION.cff
+└── .gitignore
+```
 
 ---
 
 ## Requirements
 
-Python packages:
-
 ```bash
 pip install -r requirements.txt
 ```
 
-Recommended:
+Python 3.9+ recommended.
 
-- Python 3.9+
-- Use a virtual environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+---
 
 ## Data and privacy
 
-- Do **not** commit imaging data (`*.nii*`, `*.dcm`) or generated CSVs to GitHub.
-- This repo’s [.gitignore](.gitignore) is configured to ignore common outputs and imaging formats.
+- Do **not** commit imaging data or generated CSVs to GitHub.
+- The [.gitignore](.gitignore) is configured to exclude these by default.
 - Before publishing, double-check that no PHI/PII is present in tracked files.
 
 ---
 
 ## Data assumptions
 
-Your raw dataset is expected to follow this folder structure (or similar):
+Raw dataset folder structure:
 
-```
+```text
 /data/ibd/data/patients/
   {patient_type}_{patient_id}_{year}/
     {accession_deid}_{date}/
-      *.nii.gz  (and possibly *.nii)
-      *.json    (dcm2niix sidecars, when available)
+      *.nii.gz        (NIfTI images)
+      *.json           (dcm2niix JSON sidecars, when available)
 ```
 
-Where `patient_type` is typically one of `cd`, `uc`, `ibdu`.
+`patient_type` is one of `cd`, `uc`, or `ibdu`.
 
 ---
 
-## Quick start (recommended workflow)
+## Step-by-step workflow
 
-### Step 1 — scan the uncleaned dataset and build CSVs
+> **TL;DR:** run Step 1, then Step 2 or 3 depending on what you need.
 
-Run the scanner:
+### Step 1 — Scan the dataset and build CSVs
+
+**Script:** `list_ct_data.py` — always run **first**.
+
+Walks every patient folder, reads NIfTI headers + JSON sidecars, computes a
+CTE score for each series, and writes CSVs.
 
 ```bash
 python list_ct_data.py \
@@ -67,16 +86,35 @@ python list_ct_data.py \
   --process-all-series
 ```
 
-This generates (in `--output-dir`):
+**Outputs** (written to `--output-dir`):
 
-- `ct_all_scans_combined.csv` (all CT series found)
-- `cte_all_data.csv` (CTE subset where `CTE_Score >= --cte-threshold`)
-- `cte_uc_data.csv`, `cte_cd_data.csv`, `cte_ibdu_data.csv`
-- `ct_uc_all_scans_combined.csv`, `ct_cd_all_scans_combined.csv`, `ct_ibdu_all_scans_combined.csv`
+| File | Description |
+|------|-------------|
+| `ct_all_scans_combined.csv` | Every CT series found (with CTE scoring columns) |
+| `cte_all_data.csv` | CTE subset (CTE_Score >= threshold) |
+| `cte_cd_data.csv` | CD-only CTEs |
+| `cte_uc_data.csv` | UC-only CTEs |
+| `cte_ibdu_data.csv` | IBDU-only CTEs |
+| `ct_cd_all_scans_combined.csv` | All CD CT scans |
+| `ct_uc_all_scans_combined.csv` | All UC CT scans |
+| `ct_ibdu_all_scans_combined.csv` | All IBDU CT scans |
 
-#### Tune recall vs precision
+**Key columns produced:**
 
-If you want to **catch more borderline CTEs**, lower the threshold and/or keep an “uncertain” bucket:
+| Column | Meaning |
+|--------|---------|
+| `CTE_Score` | Numerical confidence (higher = more likely CTE) |
+| `CTE_Label` | `CTE`, `UNCERTAIN`, or `NOT_CTE` |
+| `CTE_Score_Reasons` | Human-readable explanation of the score |
+| `Has_Contrast` | IV contrast detected in metadata |
+| `Has_Enterography` | Enterography keywords found |
+| `Has_Valid_Anatomy` | Abdomen/pelvis body part confirmed |
+| `NIfTI_Full_Path` | Absolute path to the NIfTI file |
+| `JSON_Full_Path` | Absolute path to the JSON sidecar |
+
+#### Tuning recall vs precision
+
+To catch more borderline CTEs, lower the threshold:
 
 ```bash
 python list_ct_data.py \
@@ -85,16 +123,14 @@ python list_ct_data.py \
   --uncertain-threshold 2.0
 ```
 
-Notes:
-- `CTE_Label` is `CTE`, `UNCERTAIN`, or `NOT_CTE`.
-- `CTE_Score_Reasons` tells you *why* a scan scored.
-
-Tip: `cte_all_data.csv` includes only `CTE` (score >= threshold). If you want the `UNCERTAIN` rows, use `ct_all_scans_combined.csv` and filter by `CTE_Label == UNCERTAIN`.
+> **Tip:** `cte_all_data.csv` only includes rows labelled `CTE`.
+> To see `UNCERTAIN` rows, filter `ct_all_scans_combined.csv` where
+> `CTE_Label == UNCERTAIN`.
 
 #### Excluding derived files
 
-By default, files with names containing `seg`, `mask`, `label`, etc. are skipped.
-You can override that list:
+Files whose names contain `seg`, `mask`, `label`, etc. are skipped by default.
+Override with:
 
 ```bash
 python list_ct_data.py --exclude-substrings seg mask label
@@ -102,9 +138,11 @@ python list_ct_data.py --exclude-substrings seg mask label
 
 ---
 
-### Step 2 — export organized folders for CT and CTE
+### Step 2 — Export organized CT + CTE folders
 
-Use the organizer (preferred mode is `from-combined`):
+**Script:** `create_cte_dataset_2.0.py` — run **after** Step 1.
+
+Reads the combined CSV and copies (or symlinks) NIfTI + JSON files into clean folders.
 
 ```bash
 python create_cte_dataset_2.0.py from-combined \
@@ -115,133 +153,100 @@ python create_cte_dataset_2.0.py from-combined \
   --include-uncertain
 ```
 
-Output:
+**Output:**
 
-```
+```text
 organized_CT_and_CTE/
-  CT_all/
-    cd/
-    uc/
-    ibdu/
-  CTE_only/
-    cd/
-    uc/
-    ibdu/
-  CT_all_mapping.csv
-  CTE_only_mapping.csv
+├── CT_all/
+│   ├── cd/       CT_000001.nii.gz, CT_000001.json, ...
+│   ├── uc/
+│   └── ibdu/
+├── CTE_only/
+│   ├── cd/       CTE_000001.nii.gz, CTE_000001.json, ...
+│   ├── uc/
+│   └── ibdu/
+├── CT_all_mapping.csv
+└── CTE_only_mapping.csv
 ```
 
-If storage is tight, use symlinks instead of copies:
+Use `--mode symlink` instead of `--mode copy` if storage is tight.
+
+There is also a **legacy mode** that reads the older per-type CSVs:
 
 ```bash
-python create_cte_dataset_2.0.py from-combined \
-  --output-dir organized_CT_and_CTE \
-  --mode symlink \
-  --include-uncertain
+python create_cte_dataset_2.0.py legacy-cte-only
 ```
 
 ---
 
-## What each script does
+### Step 3 (optional) — Collect CD CTEs for server transfer
 
-### `list_ct_data.py`
+**Script:** `cd_cte_collection.py` — run **after** Step 1.
 
-Purpose:
-- scans the raw patient folders
-- processes **all NIfTI series per date folder** (recommended for “uncleaned” data)
-- extracts metadata from:
-  - NIfTI headers
-  - JSON sidecars (best source of DICOM-derived tags)
-- computes `CTE_Score` and assigns `CTE_Label`
+Copies only the CD CTE scans (from `cte_cd_data.csv`) into a flat folder for
+easy transfer to another machine.
 
-Important output columns:
-- `CTE_Score`, `CTE_Label`, `CTE_Score_Reasons`
-- `Has_Contrast`, `Has_Enterography`, `Has_Valid_Anatomy`
-- `NIfTI_Full_Path`, `JSON_Full_Path` (used by the organizer)
+```bash
+python cd_cte_collection.py
+```
 
-### `create_cte_dataset_2.0.py`
+**Output:** `CTEs_cd_patients/CTE_CD_000001.nii.gz`, `CTE_CD_000001.json`, ...
 
-Purpose:
-- organizes files into `CT_all/` and `CTE_only/` based on the combined CSV
-- copies/symlinks both the NIfTI and JSON sidecar when available
+Edit `CSV_PATH` and `OUT_DIR` at the top of the script to customize.
 
-Modes:
-- `from-combined` (recommended): uses `ct_all_scans_combined.csv`
-- `legacy-cte-only`: uses the older `cte_uc_data.csv`, `cte_cd_data.csv`, `cte_ibdu_data.csv`
+---
+
+### Step 4 — Verify outputs
+
+```bash
+# Organized folders
+find organized_CT_and_CTE/CT_all  -name "*.nii*" | wc -l
+find organized_CT_and_CTE/CTE_only -name "*.nii*" | wc -l
+
+# CD collection
+ls CTEs_cd_patients/*.nii* 2>/dev/null | wc -l
+```
+
+---
+
+## CTE scoring explained
+
+The scoring system uses a **tiered approach** based on JSON sidecar metadata:
+
+| Tier | What it checks | Max points |
+|------|---------------|------------|
+| **1 — Modality** | `Modality == CT` | 1 |
+| **1 — Enterography** | Keywords (`entero`, `cte`, `small bowel`) in SeriesDescription / ProtocolName / StudyDescription | 2 |
+| **2 — Contrast** | `ContrastBolusAgent`, `ContrastBolusRoute`, `ImageType` containing `POST_CONTRAST` | 1 |
+| **3 — Phase** | Phase keywords (`venous`, `portal`, `enteric`) | 0.5 |
+| **4 — Anatomy** | `BodyPartExamined` = abdomen/pelvis, or large z-coverage | 1.5 |
+
+**Thresholds** (configurable via CLI):
+
+- `CTE_Score >= 3.0` -> labelled **CTE** (default)
+- `CTE_Score >= 2.0` -> labelled **UNCERTAIN** (default)
+- Below -> **NOT_CTE**
 
 ---
 
 ## Common pitfalls / troubleshooting
 
-### 1) “I’m missing CTEs”
-
-Try:
-- make sure you ran with `--process-all-series`
-- lower `--cte-threshold` (e.g. `2.5`) and include uncertain in export
-
-### 2) “No JSON sidecars”
-
-If the conversion didn’t produce JSON files, your ability to detect CTE drops.
-The code will still run using NIfTI headers, but CTE detection will be less reliable.
-
-### 3) Slow run
-
-Scanning every series is slower but improves recall. If you need speed:
-
-```bash
-python list_ct_data.py --only-largest-series
-```
-
-(Expect more missed CTEs in messy folders.)
+| Problem | Fix |
+|---------|-----|
+| Missing CTEs | Run with `--process-all-series` and lower `--cte-threshold` (e.g. `2.5`) |
+| No JSON sidecars | CTE detection is less reliable with only NIfTI headers; consider re-running dcm2niix |
+| Slow scan | Use `--only-largest-series` for speed (sacrifices recall in messy folders) |
 
 ---
 
 ## Optional / legacy scripts
 
-- `extract_ct_and_cte_from_combined_csv.py` is now redundant with `create_cte_dataset_2.0.py from-combined`.
-  You can delete it if you prefer fewer scripts.
+| Script | Status |
+|--------|--------|
+| `extract_ct_and_cte_from_combined_csv.py` | Redundant — same functionality is in `create_cte_dataset_2.0.py from-combined` |
+| `create_cte_dataset_1.0.py` | Legacy v1 organizer — superseded by v2.0 |
 
----
-
-## Publishing to GitHub (checklist)
-
-1) Confirm that outputs are ignored
-
-- `*.csv`, imaging files, and dataset folders should be ignored by default.
-- If you previously ran `git add` on outputs, untrack them before committing:
-
-```bash
-git rm -r --cached .
-git add .
-```
-
-2) Initialize git
-
-```bash
-git init
-git add .
-git status
-```
-
-3) Create a GitHub repo and push
-
-Option A (GitHub CLI):
-
-```bash
-gh repo create <your-repo-name> --public --source . --remote origin --push
-```
-
-Option B (manual remote):
-
-```bash
-git remote add origin git@github.com:<your-username>/<your-repo-name>.git
-git branch -M main
-git push -u origin main
-```
-
-4) Add a release (optional)
-
-- Use GitHub “Releases” to tag versions (e.g., `v2.0.0`).
+Both can be deleted if you prefer fewer scripts.
 
 ---
 

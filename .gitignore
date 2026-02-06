@@ -4,6 +4,7 @@
 /CTE_cases/
 /organized_CT_and_CTE/
 /extracted_CT_and_CTE/
+/CTEs_cd_patients/
 
 # Imaging files (do not commit)
 *.nii
